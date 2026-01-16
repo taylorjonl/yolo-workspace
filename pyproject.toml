@@ -27,6 +27,8 @@ check-environment = "vision_workspace.check_environment:main"
 visualize-labels = "vision_workspace.visualize_labels:main"
 init-experiment = "vision_workspace.init_experiment:main"
 train-model = "vision_workspace.train_model:main"
+evaluate-experiment = "vision_workspace.evaluate_experiment:main"
+
 
 
 [tool.setuptools]

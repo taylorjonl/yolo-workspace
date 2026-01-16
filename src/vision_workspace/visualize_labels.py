@@ -369,6 +369,47 @@ def resolve_dataset_dir_from_cwd(repo_root: Path) -> Path | None:
     return None
 
 
+def list_project_dirs(projects_dir: Path) -> list[Path]:
+    if not projects_dir.exists():
+        return []
+    project_dirs = [path for path in projects_dir.iterdir() if path.is_dir()]
+    return sorted(project_dirs, key=lambda path: path.name)
+
+
+def select_project_name(repo_root: Path) -> str | None:
+    projects_dir = repo_root / "projects"
+    project_dirs = list_project_dirs(projects_dir)
+    if not project_dirs:
+        return None
+
+    if len(project_dirs) == 1:
+        return project_dirs[0].name
+
+    if not sys.stdin.isatty():
+        print("Multiple projects found; pass the project name.", file=sys.stderr)
+        return None
+
+    print("Available projects:")
+    for idx, project_dir in enumerate(project_dirs, start=1):
+        print(f"  [{idx}] {project_dir.name}")
+
+    default_index = len(project_dirs)
+    while True:
+        raw = input(
+            f"Select project [{project_dirs[default_index - 1].name}]: "
+        ).strip()
+        if not raw:
+            return project_dirs[default_index - 1].name
+        try:
+            choice = int(raw)
+        except ValueError:
+            print("Enter a project number.", file=sys.stderr)
+            continue
+        if 1 <= choice <= len(project_dirs):
+            return project_dirs[choice - 1].name
+        print("Selection out of range.", file=sys.stderr)
+
+
 def resolve_project_name(
     project: str | None, repo_root: Path, dataset_dir: Path | None
 ) -> str | None:
@@ -389,14 +430,16 @@ def resolve_project_name(
     try:
         relative = cwd.relative_to(repo_root)
     except ValueError:
-        return None
+        relative = None
 
-    parts = relative.parts
-    if "projects" in parts:
-        index = parts.index("projects")
-        if index + 1 < len(parts):
-            return parts[index + 1]
-    return None
+    if relative:
+        parts = relative.parts
+        if "projects" in parts:
+            index = parts.index("projects")
+            if index + 1 < len(parts):
+                return parts[index + 1]
+
+    return select_project_name(repo_root)
 
 
 def find_data_yaml(start_dir: Path, stop_dir: Path) -> Path | None:

@@ -19,7 +19,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Create a dataset version from CVAT COCO exports in YOLO format."
     )
-    parser.add_argument("project", help="Project name under projects/.")
+    parser.add_argument("project", nargs="?", help="Project name under projects/.")
     parser.add_argument(
         "--train-ratio",
         type=float,
@@ -56,6 +56,24 @@ def prompt_train_ratio(default: float = 0.8) -> float:
         if 0.0 < value < 1.0:
             return value
         print("Enter a number between 0 and 1.", file=sys.stderr)
+
+
+def resolve_project_name(project: str | None, repo_root: Path) -> str | None:
+    if project:
+        return project
+
+    cwd = Path.cwd().resolve()
+    try:
+        relative = cwd.relative_to(repo_root)
+    except ValueError:
+        return None
+
+    parts = relative.parts
+    if "projects" in parts:
+        index = parts.index("projects")
+        if index + 1 < len(parts):
+            return parts[index + 1]
+    return None
 
 
 def parse_selection(raw: str, max_index: int) -> list[int]:
@@ -124,7 +142,11 @@ def find_annotation_path(names: Iterable[str]) -> str:
     preferred = "annotations/instances_default.json"
     if preferred in names:
         return preferred
-    candidates = [name for name in names if name.startswith("annotations/") and name.endswith(".json")]
+    candidates = [
+        name
+        for name in names
+        if name.startswith("annotations/") and name.endswith(".json")
+    ]
     if len(candidates) == 1:
         return candidates[0]
     if not candidates:
@@ -210,7 +232,9 @@ def combine_coco(
     return combined_images, combined_annotations, image_sources, base_metadata
 
 
-def split_ids(ids: list[int], train_ratio: float, seed: int) -> tuple[set[int], set[int]]:
+def split_ids(
+    ids: list[int], train_ratio: float, seed: int
+) -> tuple[set[int], set[int]]:
     rng = random.Random(seed)
     rng.shuffle(ids)
     total = len(ids)
@@ -252,7 +276,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     repo_root = Path(__file__).resolve().parents[2]
-    project_root = repo_root / "projects" / args.project
+    project_name = resolve_project_name(args.project, repo_root)
+    if not project_name:
+        print(
+            "Project not specified. Run from projects/<name> or pass the project name.",
+            file=sys.stderr,
+        )
+        return 2
+    project_root = repo_root / "projects" / project_name
+
     incoming_dir = project_root / "artifacts" / "incoming"
     archive_dir = project_root / "artifacts" / "archive"
     datasets_dir = project_root / "datasets"
@@ -309,14 +341,19 @@ def main(argv: list[str] | None = None) -> int:
                     split = "train" if image_id in train_ids else "val"
                     base_name = Path(zip_entry).name
                     destination = dataset_images_dir / split / base_name
-                    with zip_file.open(zip_entry) as source, destination.open("wb") as dest:
+                    with (
+                        zip_file.open(zip_entry) as source,
+                        destination.open("wb") as dest,
+                    ):
                         dest.write(source.read())
                     image = images_by_id[image_id]
                     width = image.get("width")
                     height = image.get("height")
                     if not width or not height:
                         raise ValueError("Image entry missing width/height.")
-                    label_path = dataset_labels_dir / split / f"{Path(base_name).stem}.txt"
+                    label_path = (
+                        dataset_labels_dir / split / f"{Path(base_name).stem}.txt"
+                    )
                     lines: list[str] = []
                     for annotation in annotations_by_image.get(image_id, []):
                         bbox = annotation.get("bbox")
@@ -328,7 +365,9 @@ def main(argv: list[str] | None = None) -> int:
                             raise ValueError("Annotation missing category id.")
                         class_id = int(class_id)
                         if class_id not in category_index:
-                            raise ValueError("Annotation references unknown category id.")
+                            raise ValueError(
+                                "Annotation references unknown category id."
+                            )
                         x_center = (x + w / 2.0) / width
                         y_center = (y + h / 2.0) / height
                         w_norm = w / width
@@ -337,7 +376,9 @@ def main(argv: list[str] | None = None) -> int:
                             f"{category_index[class_id]} "
                             f"{x_center:.6f} {y_center:.6f} {w_norm:.6f} {h_norm:.6f}"
                         )
-                    label_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+                    label_path.write_text(
+                        "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"
+                    )
     except (OSError, zipfile.BadZipFile) as exc:
         print(f"Failed to extract images: {exc}", file=sys.stderr)
         return 1
@@ -350,7 +391,9 @@ def main(argv: list[str] | None = None) -> int:
     for artifact in selected_artifacts:
         artifact.rename(archive_target / artifact.name)
 
-    categories_sorted = sorted(metadata.get("categories", []), key=lambda item: int(item.get("id", 0)))
+    categories_sorted = sorted(
+        metadata.get("categories", []), key=lambda item: int(item.get("id", 0))
+    )
     manifest = {
         "dataset_version": dataset_version,
         "project": args.project,
@@ -371,7 +414,9 @@ def main(argv: list[str] | None = None) -> int:
         },
         "categories": [
             {
-                "id": int(category.get("id")) if category.get("id") is not None else None,
+                "id": int(category.get("id"))
+                if category.get("id") is not None
+                else None,
                 "name": category.get("name"),
                 "index": idx,
             }

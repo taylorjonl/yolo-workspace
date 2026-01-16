@@ -34,7 +34,7 @@ COLORS = [
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Visualize YOLO labels on images.")
-    parser.add_argument("project", help="Project name under projects/.")
+    parser.add_argument("project", nargs="?", help="Project name under projects/.")
     parser.add_argument("--dataset", type=str, help="Dataset version or path")
     parser.add_argument(
         "--split",
@@ -352,6 +352,53 @@ def resolve_dataset_dir(project_root: Path, dataset_arg: str | None) -> Path | N
     return select_dataset_dir(project_root / "datasets")
 
 
+def resolve_dataset_dir_from_cwd(repo_root: Path) -> Path | None:
+    current = Path.cwd().resolve()
+    while True:
+        if current.parent.name == "datasets" and DATASET_DIR_PATTERN.match(
+            current.name
+        ):
+            return current
+        images_dir = current / "images"
+        labels_dir = current / "labels"
+        if images_dir.exists() and labels_dir.exists():
+            return current
+        if current == repo_root or current.parent == current:
+            break
+        current = current.parent
+    return None
+
+
+def resolve_project_name(
+    project: str | None, repo_root: Path, dataset_dir: Path | None
+) -> str | None:
+    if project:
+        return project
+
+    if dataset_dir:
+        try:
+            relative = dataset_dir.resolve().relative_to(repo_root)
+        except ValueError:
+            relative = None
+        if relative and "projects" in relative.parts:
+            index = relative.parts.index("projects")
+            if index + 1 < len(relative.parts):
+                return relative.parts[index + 1]
+
+    cwd = Path.cwd().resolve()
+    try:
+        relative = cwd.relative_to(repo_root)
+    except ValueError:
+        return None
+
+    parts = relative.parts
+    if "projects" in parts:
+        index = parts.index("projects")
+        if index + 1 < len(parts):
+            return parts[index + 1]
+    return None
+
+
 def find_data_yaml(start_dir: Path, stop_dir: Path) -> Path | None:
     current = start_dir
     while True:
@@ -380,7 +427,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     repo_root = Path(__file__).resolve().parents[2]
-    project_root = repo_root / "projects" / args.project
+    dataset_dir_from_cwd = resolve_dataset_dir_from_cwd(repo_root)
+    project_name = resolve_project_name(args.project, repo_root, dataset_dir_from_cwd)
+    if not project_name:
+        print(
+            "Project not specified. Run from projects/<name> or pass the project name.",
+            file=sys.stderr,
+        )
+        return 2
+    project_root = repo_root / "projects" / project_name
     if not project_root.exists():
         print(f"Project not found: {project_root}", file=sys.stderr)
         return 1
@@ -394,9 +449,11 @@ def main(argv: list[str] | None = None) -> int:
         label_path = Path(args.label) if args.label else image_path.with_suffix(".txt")
 
         class_names: list[str] | None = None
-        dataset_dir = (
-            resolve_dataset_dir(project_root, args.dataset) if args.dataset else None
-        )
+        dataset_dir = None
+        if args.dataset:
+            dataset_dir = resolve_dataset_dir(project_root, args.dataset)
+        if dataset_dir is None:
+            dataset_dir = dataset_dir_from_cwd
         if dataset_dir:
             class_names = load_class_names(dataset_dir, args.verbose)
         if class_names is None:
@@ -446,7 +503,10 @@ def main(argv: list[str] | None = None) -> int:
 
         return 0
 
-    dataset_dir = resolve_dataset_dir(project_root, args.dataset)
+    if args.dataset is None and dataset_dir_from_cwd is not None:
+        dataset_dir = dataset_dir_from_cwd
+    else:
+        dataset_dir = resolve_dataset_dir(project_root, args.dataset)
     if dataset_dir is None:
         return 1
 

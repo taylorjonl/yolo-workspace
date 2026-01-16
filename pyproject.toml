@@ -9,9 +9,21 @@ description = "Utilities and workflows for the vision workspace."
 readme = "README.md"
 requires-python = ">=3.10"
 
+dependencies = [
+  "ultralytics>=8.0.0",
+  "opencv-python>=4.8.0",
+  "numpy>=1.23",
+  "pillow>=10.0.0",
+  "pyyaml>=6.0.0",
+  "tqdm>=4.66.0",
+  "onnx>=1.15.0",
+  "onnxruntime>=1.16.0",
+]
+
 [project.scripts]
 init-project = "vision_workspace.init_project:main"
 create-dataset = "vision_workspace.create_dataset:main"
+check-environment = "vision_workspace.check_environment:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

@@ -73,7 +73,9 @@ Using `uv`:
 ```
 uv venv .venv
 .\.venv\Scripts\Activate.ps1
+uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 uv pip install -e .
+check-environment
 ```
 
 Using Python:
@@ -81,7 +83,25 @@ Using Python:
 ```
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 pip install -e .
+check-environment
+```
+
+CPU-only (no CUDA):
+
+```
+uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+uv pip install -e .
+check-environment --skip-gpu
+```
+
+or
+
+```
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+pip install -e .
+check-environment --skip-gpu
 ```
 
 ### Creating a New Project

@@ -5,9 +5,16 @@ import json
 import sys
 from pathlib import Path
 
-
 import yaml
 from ultralytics import YOLO  # type: ignore[attr-defined]
+
+from vision_workspace.cli_helpers import (
+    find_experiment_dir_from_cwd,
+    prompt_for_path,
+    resolve_experiment_dir,
+    resolve_project_name,
+    select_experiment_dir,
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -28,161 +35,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--save", action="store_true", help="Save metrics to experiment dir"
     )
     return parser.parse_args(argv)
-
-
-def extract_project_from_path(path: Path, repo_root: Path) -> str | None:
-    try:
-        relative = path.resolve().relative_to(repo_root)
-    except ValueError:
-        return None
-    parts = relative.parts
-    if "projects" in parts:
-        index = parts.index("projects")
-        if index + 1 < len(parts):
-            return parts[index + 1]
-    return None
-
-
-def list_project_dirs(projects_dir: Path) -> list[Path]:
-    if not projects_dir.exists():
-        return []
-    project_dirs = [path for path in projects_dir.iterdir() if path.is_dir()]
-    return sorted(project_dirs, key=lambda path: path.name)
-
-
-def select_project_name(repo_root: Path) -> str | None:
-    projects_dir = repo_root / "projects"
-    project_dirs = list_project_dirs(projects_dir)
-    if not project_dirs:
-        return None
-
-    if len(project_dirs) == 1:
-        return project_dirs[0].name
-
-    if not sys.stdin.isatty():
-        print("Multiple projects found; pass the project name.", file=sys.stderr)
-        return None
-
-    print("Available projects:")
-    for idx, project_dir in enumerate(project_dirs, start=1):
-        print(f"  [{idx}] {project_dir.name}")
-
-    default_index = len(project_dirs)
-    while True:
-        raw = input(
-            f"Select project [{project_dirs[default_index - 1].name}]: "
-        ).strip()
-        if not raw:
-            return project_dirs[default_index - 1].name
-        try:
-            choice = int(raw)
-        except ValueError:
-            print("Enter a project number.", file=sys.stderr)
-            continue
-        if 1 <= choice <= len(project_dirs):
-            return project_dirs[choice - 1].name
-        print("Selection out of range.", file=sys.stderr)
-
-
-def resolve_project_name(
-    project: str | None,
-    repo_root: Path,
-    config_path: Path | None,
-    experiment_dir: Path | None,
-) -> str | None:
-    if project:
-        return project
-
-    if config_path:
-        project_name = extract_project_from_path(config_path, repo_root)
-        if project_name:
-            return project_name
-
-    if experiment_dir:
-        project_name = extract_project_from_path(experiment_dir, repo_root)
-        if project_name:
-            return project_name
-
-    cwd = Path.cwd().resolve()
-    project_name = extract_project_from_path(cwd, repo_root)
-    if project_name:
-        return project_name
-
-    return select_project_name(repo_root)
-
-
-def find_experiment_dir_from_cwd(repo_root: Path) -> Path | None:
-    current = Path.cwd().resolve()
-    while True:
-        if current.parent.name == "experiments":
-            return current
-        if current == repo_root or current.parent == current:
-            break
-        current = current.parent
-    return None
-
-
-def list_experiment_dirs(experiments_dir: Path) -> list[Path]:
-    if not experiments_dir.exists():
-        return []
-    experiment_dirs = [path for path in experiments_dir.iterdir() if path.is_dir()]
-    return sorted(experiment_dirs, key=lambda path: path.name)
-
-
-def select_experiment_dir(experiments_dir: Path) -> Path | None:
-    experiment_dirs = list_experiment_dirs(experiments_dir)
-    if not experiment_dirs:
-        print(f"No experiments found in {experiments_dir}", file=sys.stderr)
-        return None
-
-    if len(experiment_dirs) == 1:
-        return experiment_dirs[0]
-
-    if not sys.stdin.isatty():
-        print(
-            "Multiple experiments found; pass --experiment or --config.",
-            file=sys.stderr,
-        )
-        return None
-
-    print("Available experiments:")
-    for idx, experiment_dir in enumerate(experiment_dirs, start=1):
-        print(f"  [{idx}] {experiment_dir.name}")
-
-    default_index = len(experiment_dirs)
-    while True:
-        raw = input(
-            f"Select experiment [{experiment_dirs[default_index - 1].name}]: "
-        ).strip()
-        if not raw:
-            return experiment_dirs[default_index - 1]
-        try:
-            choice = int(raw)
-        except ValueError:
-            print("Enter an experiment number.", file=sys.stderr)
-            continue
-        if 1 <= choice <= len(experiment_dirs):
-            return experiment_dirs[choice - 1]
-        print("Selection out of range.", file=sys.stderr)
-
-
-def resolve_experiment_dir(
-    project_root: Path,
-    experiment: str | None,
-    config_path: Path | None,
-    cwd_experiment_dir: Path | None,
-) -> tuple[Path | None, Path | None]:
-    if config_path:
-        return config_path.parent, config_path
-
-    if experiment:
-        experiment_dir = project_root / "experiments" / experiment
-        return experiment_dir, experiment_dir / "train.yaml"
-
-    if cwd_experiment_dir:
-        return cwd_experiment_dir, cwd_experiment_dir / "train.yaml"
-
-    return None, None
 
 
 def load_data_yaml_from_train(train_yaml: Path) -> Path | None:
@@ -257,17 +109,6 @@ def resolve_checkpoint_path(
     return None
 
 
-def prompt_for_path(label: str) -> Path | None:
-    if not sys.stdin.isatty():
-        return None
-
-    while True:
-        raw = input(f"{label}: ").strip()
-        if raw:
-            return Path(raw)
-        print(f"{label} is required.", file=sys.stderr)
-
-
 def evaluate(
     checkpoint_path: Path, data_yaml: Path, split: str, experiment_dir: Path
 ) -> dict:
@@ -321,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     cwd_experiment_dir = find_experiment_dir_from_cwd(repo_root)
 
     project_name = resolve_project_name(
-        args.project, repo_root, config_path, cwd_experiment_dir
+        args.project, repo_root, config_path=config_path, context_dir=cwd_experiment_dir
     )
     if not project_name:
         print(

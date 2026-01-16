@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
 import yaml
 
-
-DATASET_DIR_PATTERN = re.compile(r"^dataset_v(\d+)$")
+from vision_workspace.cli_helpers import (
+    resolve_dataset_dir,
+    resolve_dataset_dir_from_cwd,
+    resolve_project_name,
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -27,162 +29,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--imgsz", type=int, default=640, help="Image size")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     return parser.parse_args(argv)
-
-
-def extract_project_from_path(path: Path, repo_root: Path) -> str | None:
-    try:
-        relative = path.resolve().relative_to(repo_root)
-    except ValueError:
-        return None
-    parts = relative.parts
-    if "projects" in parts:
-        index = parts.index("projects")
-        if index + 1 < len(parts):
-            return parts[index + 1]
-    return None
-
-
-def list_project_dirs(projects_dir: Path) -> list[Path]:
-    if not projects_dir.exists():
-        return []
-    project_dirs = [path for path in projects_dir.iterdir() if path.is_dir()]
-    return sorted(project_dirs, key=lambda path: path.name)
-
-
-def select_project_name(repo_root: Path) -> str | None:
-    projects_dir = repo_root / "projects"
-    project_dirs = list_project_dirs(projects_dir)
-    if not project_dirs:
-        return None
-
-    if len(project_dirs) == 1:
-        return project_dirs[0].name
-
-    if not sys.stdin.isatty():
-        print("Multiple projects found; pass the project name.", file=sys.stderr)
-        return None
-
-    print("Available projects:")
-    for idx, project_dir in enumerate(project_dirs, start=1):
-        print(f"  [{idx}] {project_dir.name}")
-
-    default_index = len(project_dirs)
-    while True:
-        raw = input(
-            f"Select project [{project_dirs[default_index - 1].name}]: "
-        ).strip()
-        if not raw:
-            return project_dirs[default_index - 1].name
-        try:
-            choice = int(raw)
-        except ValueError:
-            print("Enter a project number.", file=sys.stderr)
-            continue
-        if 1 <= choice <= len(project_dirs):
-            return project_dirs[choice - 1].name
-        print("Selection out of range.", file=sys.stderr)
-
-
-def resolve_project_name(
-    project: str | None,
-    repo_root: Path,
-    dataset_dir: Path | None,
-) -> str | None:
-    if project:
-        return project
-
-    if dataset_dir:
-        project_name = extract_project_from_path(dataset_dir, repo_root)
-        if project_name:
-            return project_name
-
-    cwd = Path.cwd().resolve()
-    project_name = extract_project_from_path(cwd, repo_root)
-    if project_name:
-        return project_name
-
-    return select_project_name(repo_root)
-
-
-def dataset_sort_key(dataset_dir: Path) -> tuple[int, int | str]:
-    match = DATASET_DIR_PATTERN.match(dataset_dir.name)
-    if match:
-        return (0, int(match.group(1)))
-    return (1, dataset_dir.name)
-
-
-def list_dataset_dirs(datasets_dir: Path) -> list[Path]:
-    if not datasets_dir.exists():
-        return []
-    dataset_dirs = [path for path in datasets_dir.iterdir() if path.is_dir()]
-    return sorted(dataset_dirs, key=dataset_sort_key)
-
-
-def select_dataset_dir(datasets_dir: Path) -> Path | None:
-    dataset_dirs = list_dataset_dirs(datasets_dir)
-    if not dataset_dirs:
-        print(f"No datasets found in {datasets_dir}", file=sys.stderr)
-        return None
-
-    if len(dataset_dirs) == 1:
-        return dataset_dirs[0]
-
-    if not sys.stdin.isatty():
-        print("Multiple datasets found; pass --dataset to select one.", file=sys.stderr)
-        return None
-
-    print("Available datasets:")
-    for idx, dataset_dir in enumerate(dataset_dirs, start=1):
-        print(f"  [{idx}] {dataset_dir.name}")
-
-    default_index = len(dataset_dirs)
-    while True:
-        raw = input(
-            f"Select dataset [{dataset_dirs[default_index - 1].name}]: "
-        ).strip()
-        if not raw:
-            return dataset_dirs[default_index - 1]
-        try:
-            choice = int(raw)
-        except ValueError:
-            print("Enter a dataset number.", file=sys.stderr)
-            continue
-        if 1 <= choice <= len(dataset_dirs):
-            return dataset_dirs[choice - 1]
-        print("Selection out of range.", file=sys.stderr)
-
-
-def resolve_dataset_dir(project_root: Path, dataset_arg: str | None) -> Path | None:
-    if dataset_arg:
-        candidate = Path(dataset_arg)
-        if candidate.exists():
-            if candidate.is_dir():
-                return candidate
-            print(f"Dataset path is not a directory: {candidate}", file=sys.stderr)
-            return None
-        candidate = project_root / "datasets" / dataset_arg
-        if candidate.exists():
-            if candidate.is_dir():
-                return candidate
-            print(f"Dataset path is not a directory: {candidate}", file=sys.stderr)
-            return None
-        print(f"Dataset not found: {dataset_arg}", file=sys.stderr)
-        return None
-
-    return select_dataset_dir(project_root / "datasets")
-
-
-def resolve_dataset_dir_from_cwd(repo_root: Path) -> Path | None:
-    current = Path.cwd().resolve()
-    while True:
-        if current.parent.name == "datasets" and DATASET_DIR_PATTERN.match(
-            current.name
-        ):
-            return current
-        if current == repo_root or current.parent == current:
-            break
-        current = current.parent
-    return None
 
 
 def resolve_experiment_name(project_root: Path, experiment: str | None) -> str | None:
@@ -249,7 +95,9 @@ def main(argv: list[str] | None = None) -> int:
 
     repo_root = Path(__file__).resolve().parents[2]
     dataset_dir_from_cwd = resolve_dataset_dir_from_cwd(repo_root)
-    project_name = resolve_project_name(args.project, repo_root, dataset_dir_from_cwd)
+    project_name = resolve_project_name(
+        args.project, repo_root, context_dir=dataset_dir_from_cwd
+    )
     if not project_name:
         print(
             "Project not specified. Run from projects/<name> or pass the project name.",

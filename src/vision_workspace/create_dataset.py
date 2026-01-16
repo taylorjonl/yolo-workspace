@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import re
 import sys
 import zipfile
 from collections import defaultdict
@@ -11,8 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-
-DATASET_DIR_PATTERN = re.compile(r"^dataset_v(\d+)$")
+from vision_workspace.cli_helpers import DATASET_DIR_PATTERN, resolve_project_name
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -56,67 +54,6 @@ def prompt_train_ratio(default: float = 0.8) -> float:
         if 0.0 < value < 1.0:
             return value
         print("Enter a number between 0 and 1.", file=sys.stderr)
-
-
-def list_project_dirs(projects_dir: Path) -> list[Path]:
-    if not projects_dir.exists():
-        return []
-    project_dirs = [path for path in projects_dir.iterdir() if path.is_dir()]
-    return sorted(project_dirs, key=lambda path: path.name)
-
-
-def select_project_name(repo_root: Path) -> str | None:
-    projects_dir = repo_root / "projects"
-    project_dirs = list_project_dirs(projects_dir)
-    if not project_dirs:
-        return None
-
-    if len(project_dirs) == 1:
-        return project_dirs[0].name
-
-    if not sys.stdin.isatty():
-        print("Multiple projects found; pass the project name.", file=sys.stderr)
-        return None
-
-    print("Available projects:")
-    for idx, project_dir in enumerate(project_dirs, start=1):
-        print(f"  [{idx}] {project_dir.name}")
-
-    default_index = len(project_dirs)
-    while True:
-        raw = input(
-            f"Select project [{project_dirs[default_index - 1].name}]: "
-        ).strip()
-        if not raw:
-            return project_dirs[default_index - 1].name
-        try:
-            choice = int(raw)
-        except ValueError:
-            print("Enter a project number.", file=sys.stderr)
-            continue
-        if 1 <= choice <= len(project_dirs):
-            return project_dirs[choice - 1].name
-        print("Selection out of range.", file=sys.stderr)
-
-
-def resolve_project_name(project: str | None, repo_root: Path) -> str | None:
-    if project:
-        return project
-
-    cwd = Path.cwd().resolve()
-    try:
-        relative = cwd.relative_to(repo_root)
-    except ValueError:
-        relative = None
-
-    if relative:
-        parts = relative.parts
-        if "projects" in parts:
-            index = parts.index("projects")
-            if index + 1 < len(parts):
-                return parts[index + 1]
-
-    return select_project_name(repo_root)
 
 
 def parse_selection(raw: str, max_index: int) -> list[int]:
@@ -311,13 +248,6 @@ def write_manifest(path: Path, data: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    train_ratio = args.train_ratio
-    if train_ratio is None:
-        train_ratio = prompt_train_ratio()
-    if not (0.0 < train_ratio < 1.0):
-        print("Train ratio must be between 0 and 1.", file=sys.stderr)
-        return 2
-
     repo_root = Path(__file__).resolve().parents[2]
     project_name = resolve_project_name(args.project, repo_root)
     if not project_name:
@@ -337,6 +267,17 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     artifacts = sorted(incoming_dir.glob("*.zip"))
+    if not artifacts:
+        print("No incoming artifacts were found.", file=sys.stderr)
+        return 1
+
+    train_ratio = args.train_ratio
+    if train_ratio is None:
+        train_ratio = prompt_train_ratio()
+    if not (0.0 < train_ratio < 1.0):
+        print("Train ratio must be between 0 and 1.", file=sys.stderr)
+        return 2
+
     try:
         selected_artifacts = select_artifacts(artifacts, args.all)
     except ValueError as exc:
@@ -344,6 +285,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     dataset_version = next_dataset_version(datasets_dir)
+
     dataset_root = datasets_dir / dataset_version
     if dataset_root.exists():
         print(f"Dataset already exists: {dataset_root}", file=sys.stderr)

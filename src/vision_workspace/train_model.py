@@ -72,8 +72,12 @@ def train_model(config: dict, experiment_name: str, experiment_dir: Path) -> dic
         print(f"Setting random seed: {config['seed']}")
         set_seed(int(config["seed"]))
 
-    config.setdefault("project", str(experiment_dir / "runs"))
-    config.setdefault("name", "detect")
+    project_root = experiment_dir.parent.parent
+    checkpoints_dir = project_root / "models" / "checkpoints"
+
+    config.setdefault("project", str(checkpoints_dir))
+    config.setdefault("name", experiment_name)
+    config.setdefault("exist_ok", True)
 
     model_name = config.get("model", "yolov8n.pt")
     print(f"Initializing model: {model_name}")

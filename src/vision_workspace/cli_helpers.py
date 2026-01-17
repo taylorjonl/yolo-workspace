@@ -248,6 +248,51 @@ def resolve_dataset_dir_from_cwd(repo_root: Path) -> Path | None:
     return None
 
 
+def resolve_checkpoint_path(
+    experiment_dir: Path | None, checkpoint_arg: str | None
+) -> Path | None:
+    if checkpoint_arg:
+        return Path(checkpoint_arg)
+
+    if not experiment_dir:
+        return None
+
+    preferred = experiment_dir / "weights" / "best.pt"
+    if preferred.exists():
+        return preferred
+
+    if experiment_dir.parent.name == "experiments":
+        project_root = experiment_dir.parent.parent
+        preferred = (
+            project_root
+            / "models"
+            / "checkpoints"
+            / experiment_dir.name
+            / "weights"
+            / "best.pt"
+        )
+        if preferred.exists():
+            return preferred
+
+    preferred = experiment_dir / "runs" / "detect" / "weights" / "best.pt"
+    if preferred.exists():
+        return preferred
+
+    candidates = sorted(
+        experiment_dir.rglob("best.pt"), key=lambda path: path.stat().st_mtime
+    )
+    if candidates:
+        return candidates[-1]
+
+    candidates = sorted(
+        experiment_dir.rglob("last.pt"), key=lambda path: path.stat().st_mtime
+    )
+    if candidates:
+        return candidates[-1]
+
+    return None
+
+
 def prompt_for_path(label: str) -> Path | None:
     if not sys.stdin.isatty():
         return None

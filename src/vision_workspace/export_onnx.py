@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
-from datetime import datetime
 from pathlib import Path
 
 from ultralytics import YOLO  # type: ignore[attr-defined]
@@ -18,49 +18,34 @@ from vision_workspace.cli_helpers import (
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run YOLOv8 inference on images.")
+    parser = argparse.ArgumentParser(description="Export a trained model to ONNX.")
     parser.add_argument("project", nargs="?", help="Project name under projects/.")
     parser.add_argument("--experiment", type=str, help="Experiment name")
     parser.add_argument("--config", type=str, help="Path to experiment train.yaml")
     parser.add_argument("--checkpoint", type=str, help="Path to checkpoint (.pt)")
+    parser.add_argument("--output", type=str, help="Output directory for ONNX file")
+    parser.add_argument("--imgsz", type=int, default=640, help="Export image size")
+    parser.add_argument("--opset", type=int, default=12, help="ONNX opset version")
+    parser.add_argument("--dynamic", action="store_true", help="Enable dynamic axes")
     parser.add_argument(
-        "--source", type=str, help="Image or folder to run inference on"
+        "--simplify", action="store_true", help="Simplify the ONNX graph"
     )
-    parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold")
-    parser.add_argument("--iou", type=float, default=0.7, help="IoU threshold")
-    parser.add_argument("--imgsz", type=int, default=640, help="Image size")
-    parser.add_argument(
-        "--save-txt", action="store_true", help="Save YOLO-format labels"
-    )
-    parser.add_argument("--save-crop", action="store_true", help="Save detected crops")
-    parser.add_argument("--name", type=str, help="Output run name")
     return parser.parse_args(argv)
 
 
-def run_inference(
-    checkpoint_path: Path,
-    source: Path,
-    experiment_dir: Path,
-    conf: float,
-    iou: float,
-    imgsz: int,
-    save_txt: bool,
-    save_crop: bool,
-    run_name: str,
-) -> None:
-    model = YOLO(str(checkpoint_path))
-    model.predict(
-        source=str(source),
-        conf=conf,
-        iou=iou,
-        imgsz=imgsz,
-        project=str(experiment_dir / "predictions"),
-        name=run_name,
-        save=True,
-        save_txt=save_txt,
-        save_crop=save_crop,
-        exist_ok=True,
+def resolve_export_path(checkpoint_path: Path, export_result: object) -> Path | None:
+    if isinstance(export_result, (str, Path)):
+        candidate = Path(export_result)
+        if candidate.exists():
+            return candidate
+
+    candidates = sorted(
+        checkpoint_path.parent.rglob("*.onnx"), key=lambda path: path.stat().st_mtime
     )
+    if candidates:
+        return candidates[-1]
+
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -104,28 +89,34 @@ def main(argv: list[str] | None = None) -> int:
         print("Checkpoint not specified.", file=sys.stderr)
         return 2
 
-    source = Path(args.source) if args.source else prompt_for_path("Source path")
-    if source is None:
-        print("Source not specified.", file=sys.stderr)
-        return 2
-
-    if not source.exists():
-        print(f"Source not found: {source}", file=sys.stderr)
+    if not checkpoint_path.exists():
+        print(f"Checkpoint not found: {checkpoint_path}", file=sys.stderr)
         return 1
 
-    run_name = args.name or datetime.now().strftime("predict_%Y%m%d_%H%M%S")
+    output_dir = Path(args.output) if args.output else None
+    if output_dir is None:
+        output_dir = project_root / "models" / "exports" / experiment_dir.name
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    run_inference(
-        checkpoint_path,
-        source,
-        experiment_dir,
-        args.conf,
-        args.iou,
-        args.imgsz,
-        args.save_txt,
-        args.save_crop,
-        run_name,
+    model = YOLO(str(checkpoint_path))
+    export_result = model.export(
+        format="onnx",
+        imgsz=args.imgsz,
+        opset=args.opset,
+        dynamic=args.dynamic,
+        simplify=args.simplify,
     )
+
+    export_path = resolve_export_path(checkpoint_path, export_result)
+    if export_path is None:
+        print("ONNX export failed: file not found.", file=sys.stderr)
+        return 1
+
+    destination = output_dir / f"{experiment_dir.name}.onnx"
+    if export_path.resolve() != destination.resolve():
+        shutil.copy2(export_path, destination)
+
+    print(f"Exported ONNX to: {destination}")
     return 0
 
 

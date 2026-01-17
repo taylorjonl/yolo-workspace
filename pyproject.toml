@@ -29,6 +29,7 @@ init-experiment = "vision_workspace.init_experiment:main"
 train-model = "vision_workspace.train_model:main"
 evaluate-experiment = "vision_workspace.evaluate_experiment:main"
 run-inference = "vision_workspace.run_inference:main"
+export-onnx = "vision_workspace.export_onnx:main"
 
 
 

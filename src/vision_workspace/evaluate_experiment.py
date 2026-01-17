@@ -11,6 +11,7 @@ from ultralytics import YOLO  # type: ignore[attr-defined]
 from vision_workspace.cli_helpers import (
     find_experiment_dir_from_cwd,
     prompt_for_path,
+    resolve_checkpoint_path,
     resolve_experiment_dir,
     resolve_project_name,
     select_experiment_dir,
@@ -77,34 +78,6 @@ def resolve_data_yaml(
         candidate = experiment_dir / "data.yaml"
         if candidate.exists():
             return candidate
-
-    return None
-
-
-def resolve_checkpoint_path(
-    experiment_dir: Path | None, checkpoint_arg: str | None
-) -> Path | None:
-    if checkpoint_arg:
-        return Path(checkpoint_arg)
-
-    if not experiment_dir:
-        return None
-
-    preferred = experiment_dir / "runs" / "detect" / "weights" / "best.pt"
-    if preferred.exists():
-        return preferred
-
-    candidates = sorted(
-        experiment_dir.rglob("best.pt"), key=lambda path: path.stat().st_mtime
-    )
-    if candidates:
-        return candidates[-1]
-
-    candidates = sorted(
-        experiment_dir.rglob("last.pt"), key=lambda path: path.stat().st_mtime
-    )
-    if candidates:
-        return candidates[-1]
 
     return None
 
